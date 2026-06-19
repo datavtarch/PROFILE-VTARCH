@@ -21,7 +21,7 @@ npm.cmd install
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 ```
 
 3. Run the app:
@@ -43,7 +43,7 @@ If Supabase env vars are empty, the app runs in local demo mode.
 1. Create a Supabase project.
 2. Open SQL Editor.
 3. Run `supabase/migrations/0001_initial.sql`.
-4. Copy the project URL and anon public key into `.env.local`.
+4. Copy the project URL and publishable key into `.env.local`.
 
 ## Checks
 

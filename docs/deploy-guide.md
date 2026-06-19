@@ -11,6 +11,7 @@
 ## Expected Environment Variables
 
 - `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` only if a server-only feature needs privileged access.
 - `TELEGRAM_BOT_TOKEN` only after Telegram integration is added.
