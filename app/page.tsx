@@ -109,7 +109,7 @@ export default function Home() {
   const visibleTasks = useMemo(() => {
     return tasks
       .filter((task) => {
-        if (activeView === "today") return isToday(task.due_at) && task.status !== "done";
+        if (activeView === "today") return isTodayOrUnscheduled(task) && task.status !== "done";
         if (activeView === "upcoming") return isUpcoming(task.due_at) && task.status !== "done";
         if (activeView === "overdue") return isOverdue(task);
         return task.status === "done";
@@ -169,6 +169,7 @@ export default function Home() {
     event.preventDefault();
     const title = taskInput.title.trim();
     if (!title) return;
+    setNotice("");
 
     const payload = {
       title,
@@ -191,6 +192,8 @@ export default function Home() {
           ? current.map((task) => (task.id === editingId ? { ...task, ...localTask } : task))
           : [localTask, ...current]
       );
+      setActiveView(viewForTask(localTask));
+      setNotice("Đã lưu việc.");
       resetForm();
       return;
     }
@@ -212,11 +215,14 @@ export default function Home() {
       return;
     }
 
+    const savedTask = data as Task;
     setTasks((current) =>
       editingId
-        ? current.map((task) => (task.id === editingId ? (data as Task) : task))
-        : [data as Task, ...current]
+        ? current.map((task) => (task.id === editingId ? savedTask : task))
+        : [savedTask, ...current]
     );
+    setActiveView(viewForTask(savedTask));
+    setNotice("Đã lưu việc.");
     resetForm();
   }
 
@@ -570,6 +576,10 @@ function isToday(date: string | null) {
   return target.toDateString() === now.toDateString();
 }
 
+function isTodayOrUnscheduled(task: Task) {
+  return !task.due_at || isToday(task.due_at);
+}
+
 function isUpcoming(date: string | null) {
   if (!date) return false;
   const target = new Date(date);
@@ -580,6 +590,13 @@ function isUpcoming(date: string | null) {
 function isOverdue(task: Task) {
   if (!task.due_at || task.status === "done" || task.status === "cancelled") return false;
   return new Date(task.due_at) < new Date() && !isToday(task.due_at);
+}
+
+function viewForTask(task: Task): ViewKey {
+  if (task.status === "done") return "completed";
+  if (isOverdue(task)) return "overdue";
+  if (isUpcoming(task.due_at)) return "upcoming";
+  return "today";
 }
 
 function priorityRank(priority: TaskPriority) {
