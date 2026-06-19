@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend UI Design"
+  short_description: "Design polished task-management interfaces."
+  default_prompt: "Use the UI design workflow for this app."

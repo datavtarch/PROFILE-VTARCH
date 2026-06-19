@@ -1,0 +1,4 @@
+interface:
+  display_name: "Telegram Report"
+  short_description: "Design Telegram bot reports and commands."
+  default_prompt: "Use the Telegram reporting workflow for this task app."

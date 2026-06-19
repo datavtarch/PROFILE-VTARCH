@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vercel Deploy"
+  short_description: "Prepare and verify GitHub to Vercel deployment."
+  default_prompt: "Use the Vercel deploy workflow for this app."

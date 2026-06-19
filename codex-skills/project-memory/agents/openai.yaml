@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Memory"
+  short_description: "Maintain project knowledge and decisions."
+  default_prompt: "Update or use the project memory for this task."

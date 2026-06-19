@@ -1,0 +1,4 @@
+interface:
+  display_name: "Self Test QA"
+  short_description: "Run focused checks before marking work complete."
+  default_prompt: "Run the self-test checklist for this change."

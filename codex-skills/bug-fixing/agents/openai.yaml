@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bug Fixing"
+  short_description: "Diagnose, fix, and verify bugs methodically."
+  default_prompt: "Use the bug fixing workflow for this issue."

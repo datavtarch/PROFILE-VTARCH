@@ -1,0 +1,4 @@
+interface:
+  display_name: "Supabase Security"
+  short_description: "Design Supabase auth, RLS, and per-user data isolation."
+  default_prompt: "Use Supabase security rules for this change."
