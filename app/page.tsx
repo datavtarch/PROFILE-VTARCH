@@ -40,6 +40,8 @@ const defaultProfile = {
   evening_report_time: "18:00"
 };
 
+const telegramBotUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "task_tele_vtarch_bot";
+
 const demoTasks: Task[] = [
   {
     id: "demo-1",
@@ -493,7 +495,7 @@ export default function Home() {
                 <Send size={18} />
                 <div>
                   <strong>Telegram</strong>
-                  <p>Bot: @task_tele_vtarch_bot</p>
+                  <p>Bot: @{telegramBotUsername}</p>
                   {telegramLinkCode ? <code className="telegram-code">/link {telegramLinkCode}</code> : null}
                   <button className="mini-button" type="button" onClick={createTelegramLinkCode} disabled={!session}>
                     Tạo mã liên kết

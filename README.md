@@ -1,13 +1,17 @@
 # Task Tele
 
-Personal task manager with Supabase Auth, private per-user data, Telegram commands, reminders, and scheduled reports.
+Personal task manager using GitHub Pages, Supabase, Cloudflare Worker, and Telegram.
 
-## Stack
+## Architecture
 
-- Next.js + TypeScript
-- Supabase Auth + Postgres + Row Level Security
-- Vercel hosting + Vercel Cron
-- Telegram Bot API webhook
+```text
+GitHub Pages -> static Next.js app
+Supabase     -> Auth + Postgres + RLS
+Cloudflare Worker -> Telegram webhook + scheduled reminders
+Telegram     -> commands and notifications
+```
+
+No Vercel is required for the current setup.
 
 ## Local Setup
 
@@ -20,10 +24,7 @@ Create `.env.local`:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
-SUPABASE_SECRET_KEY=
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_WEBHOOK_SECRET=
-CRON_SECRET=
+NEXT_PUBLIC_TELEGRAM_BOT_USERNAME=task_tele_vtarch_bot
 ```
 
 Run:
@@ -32,41 +33,56 @@ Run:
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:3000`.
+## Supabase
 
-## Supabase Setup
-
-Run migrations in order from `supabase/migrations`:
-
-1. `0001_initial.sql`
-2. `0002_authenticated_grants.sql`
-3. `0003_telegram_link_tokens.sql`
-4. `0004_service_role_grants.sql`
-5. `0005_reports_and_reminders.sql`
+Run migrations in order from `supabase/migrations`.
 
 RLS keeps each user's tasks private through `auth.uid() = user_id`.
 
-## Vercel Env
+## GitHub Pages
 
-Set these in Vercel Project Settings:
+The workflow `.github/workflows/pages.yml` builds static output to `out`.
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SECRET_KEY`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_WEBHOOK_SECRET`
-- `CRON_SECRET`
+The public Supabase URL, publishable key, and Telegram bot username are embedded in the workflow. They are safe for browser use because Supabase RLS protects private rows. Do not put `SUPABASE_SECRET_KEY` or Telegram bot token in the Pages workflow.
 
-`vercel.json` runs two daily cron jobs on the Hobby plan:
+For this repo, the workflow uses:
 
-- `/api/telegram/cron/morning` at `0 1 * * *` UTC, roughly 08:00 Asia/Bangkok
-- `/api/telegram/cron/evening` at `0 11 * * *` UTC, roughly 18:00 Asia/Bangkok
+```env
+NEXT_PUBLIC_BASE_PATH=/PROFILE-VTARCH
+```
 
-Vercel Hobby does not allow hourly cron. Due reminders run together with those daily checks.
+After the workflow runs, enable GitHub Pages from **Settings -> Pages -> GitHub Actions**.
 
-## Telegram
+## Cloudflare Worker
 
-Set webhook:
+Worker source: `worker/task-tele-worker.js`
+
+Config: `wrangler.toml`
+
+Set Cloudflare secrets:
+
+```powershell
+npx wrangler secret put SUPABASE_SECRET_KEY
+npx wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+npx wrangler secret put CRON_SECRET
+```
+
+Deploy:
+
+```powershell
+npx wrangler deploy
+```
+
+The Worker exposes:
+
+- `POST /webhook` for Telegram webhook
+- `GET /cron` for manual/authorized cron checks
+- scheduled trigger every 15 minutes through Cloudflare
+
+## Telegram Webhook
+
+Set webhook to the Worker URL:
 
 ```text
 https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook
@@ -76,7 +92,7 @@ Body:
 
 ```json
 {
-  "url": "https://task-tele.vercel.app/api/telegram/webhook",
+  "url": "https://<worker-domain>/webhook",
   "secret_token": "<TELEGRAM_WEBHOOK_SECRET>",
   "drop_pending_updates": true
 }
@@ -99,5 +115,4 @@ Commands:
 npm.cmd run typecheck
 npm.cmd run build
 powershell -ExecutionPolicy Bypass -File .\codex-skills\supabase-security\scripts\check-rls.ps1 -Path .\supabase\migrations
-powershell -ExecutionPolicy Bypass -File .\codex-skills\vercel-deploy\scripts\predeploy-check.ps1 -Root .
 ```
