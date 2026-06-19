@@ -57,7 +57,12 @@ Set these in Vercel Project Settings:
 - `TELEGRAM_WEBHOOK_SECRET`
 - `CRON_SECRET`
 
-`vercel.json` runs `/api/telegram/cron` every hour.
+`vercel.json` runs two daily cron jobs on the Hobby plan:
+
+- `/api/telegram/cron/morning` at `0 1 * * *` UTC, roughly 08:00 Asia/Bangkok
+- `/api/telegram/cron/evening` at `0 11 * * *` UTC, roughly 18:00 Asia/Bangkok
+
+Vercel Hobby does not allow hourly cron. Due reminders run together with those daily checks.
 
 ## Telegram
 

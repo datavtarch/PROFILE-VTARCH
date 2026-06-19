@@ -131,15 +131,14 @@ async function sendDailyReport(botToken: string, account: TelegramAccount) {
 
 function shouldSendReportNow(profile: Profile) {
   const now = new Date();
-  const local = new Intl.DateTimeFormat("en-GB", {
+  const localHour = new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
-    minute: "2-digit",
     hour12: false,
     timeZone: profile.timezone || "Asia/Bangkok"
   }).format(now);
 
-  const allowed = new Set([profile.morning_report_time.slice(0, 5), profile.evening_report_time.slice(0, 5)]);
-  return allowed.has(local);
+  const allowedHours = new Set([profile.morning_report_time.slice(0, 2), profile.evening_report_time.slice(0, 2)]);
+  return allowedHours.has(localHour);
 }
 
 function isToday(date: string | null) {
