@@ -11,6 +11,16 @@ Telegram should be added after the web app has stable login, tasks, and Supabase
 - Send overdue tasks.
 - Mark a task done from Telegram.
 
+## Webhook
+
+- Production webhook path: `/api/telegram/webhook`
+- Required Vercel env vars:
+  - `SUPABASE_SECRET_KEY`
+  - `TELEGRAM_BOT_TOKEN`
+  - `TELEGRAM_WEBHOOK_SECRET`
+- Set Telegram webhook to:
+  - `https://task-tele.vercel.app/api/telegram/webhook`
+
 ## Later Bot Features
 
 - Morning report.

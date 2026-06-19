@@ -245,10 +245,39 @@ select:focus {
   margin-top: 10px;
 }
 
+.telegram-box > div {
+  flex: 1;
+  min-width: 0;
+}
+
 .telegram-box p,
 .muted {
   color: var(--muted);
   margin: 4px 0 0;
+}
+
+.telegram-code {
+  background: #17201b;
+  border-radius: 8px;
+  color: #fff9e8;
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+  padding: 10px;
+}
+
+.mini-button {
+  background: var(--green);
+  border: 1px solid var(--green);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin-top: 10px;
+  min-height: 38px;
+  padding: 0 12px;
 }
 
 .stat-grid {

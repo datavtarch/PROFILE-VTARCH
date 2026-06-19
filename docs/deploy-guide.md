@@ -14,7 +14,9 @@
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` only if a server-only feature needs privileged access.
+- `SUPABASE_SECRET_KEY` for Telegram webhook server-side data access.
 - `TELEGRAM_BOT_TOKEN` only after Telegram integration is added.
+- `TELEGRAM_WEBHOOK_SECRET` to verify Telegram webhook requests.
 
 ## Guardrails
 

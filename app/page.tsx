@@ -70,6 +70,7 @@ export default function Home() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
+  const [telegramLinkCode, setTelegramLinkCode] = useState("");
 
   useEffect(() => {
     if (!supabase) {
@@ -291,6 +292,29 @@ export default function Home() {
     setTasks([]);
   }
 
+  async function createTelegramLinkCode() {
+    if (!supabase || !session) {
+      setNotice("Đăng nhập trước khi liên kết Telegram.");
+      return;
+    }
+
+    const token = generateTelegramToken();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    const { error } = await supabase.from("telegram_link_tokens").insert({
+      user_id: session.user.id,
+      token,
+      expires_at: expiresAt
+    });
+
+    if (error) {
+      setNotice(error.message);
+      return;
+    }
+
+    setTelegramLinkCode(token);
+    setNotice("Đã tạo mã liên kết Telegram. Mã hết hạn sau 15 phút.");
+  }
+
   const shouldShowAuth = configured && !session;
 
   return (
@@ -453,6 +477,18 @@ export default function Home() {
                 <Send size={18} />
                 <div>
                   <strong>Telegram</strong>
+                  <p>Tạo mã rồi gửi cho bot: /link MA_LIEN_KET</p>
+                  {telegramLinkCode ? (
+                    <code className="telegram-code">/link {telegramLinkCode}</code>
+                  ) : null}
+                  <button
+                    className="mini-button"
+                    type="button"
+                    onClick={createTelegramLinkCode}
+                    disabled={!session}
+                  >
+                    Tạo mã liên kết
+                  </button>
                   <p>Chuẩn bị liên kết bot sau khi Supabase ổn định.</p>
                 </div>
               </div>
@@ -628,4 +664,13 @@ function toDateTimeLocal(date: string) {
   const value = new Date(date);
   value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
   return value.toISOString().slice(0, 16);
+}
+
+function generateTelegramToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(5));
+  return Array.from(bytes)
+    .map((byte) => byte.toString(36).padStart(2, "0"))
+    .join("")
+    .slice(0, 10)
+    .toUpperCase();
 }
