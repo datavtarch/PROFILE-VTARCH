@@ -31,5 +31,7 @@ export type Profile = {
   telegram_reminders_enabled: boolean;
   morning_report_time: string;
   evening_report_time: string;
+  last_morning_report_date: string | null;
+  last_evening_report_date: string | null;
   created_at: string;
 };

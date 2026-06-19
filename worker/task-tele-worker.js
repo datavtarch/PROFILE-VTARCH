@@ -197,7 +197,7 @@ async function runAutomation(env) {
     supabaseSelect(env, "/telegram_accounts?select=user_id,telegram_chat_id"),
     supabaseSelect(
       env,
-      "/profiles?select=id,display_name,timezone,telegram_reports_enabled,telegram_reminders_enabled,morning_report_time,evening_report_time,created_at"
+      "/profiles?select=id,display_name,timezone,telegram_reports_enabled,telegram_reminders_enabled,morning_report_time,evening_report_time,last_morning_report_date,last_evening_report_date,created_at"
     )
   ]);
 
@@ -213,8 +213,10 @@ async function runAutomation(env) {
         results.reminders += await sendDueReminders(env, account);
       }
 
-      if (profile.telegram_reports_enabled !== false && shouldSendReportNow(profile)) {
+      const reportSlot = getDueReportSlot(profile);
+      if (profile.telegram_reports_enabled !== false && reportSlot) {
         await sendDailyReport(env, account);
+        await markReportSent(env, profile, reportSlot);
         results.reports += 1;
       }
     } catch (error) {
@@ -374,14 +376,42 @@ function formatTaskList(title, tasks) {
   ].join("\n");
 }
 
-function shouldSendReportNow(profile) {
+async function markReportSent(env, profile, slot) {
+  const field = slot === "morning" ? "last_morning_report_date" : "last_evening_report_date";
+  await supabasePatch(env, `/profiles?id=eq.${profile.id}`, {
+    [field]: getLocalDate(profile.timezone || "Asia/Bangkok")
+  });
+}
+
+function getDueReportSlot(profile) {
+  const timezone = profile.timezone || "Asia/Bangkok";
   const localHour = new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     hour12: false,
-    timeZone: profile.timezone || "Asia/Bangkok"
+    timeZone: timezone
   }).format(new Date());
-  const allowedHours = new Set([profile.morning_report_time.slice(0, 2), profile.evening_report_time.slice(0, 2)]);
-  return allowedHours.has(localHour);
+  const localDate = getLocalDate(timezone);
+
+  if (profile.morning_report_time?.slice(0, 2) === localHour && profile.last_morning_report_date !== localDate) {
+    return "morning";
+  }
+
+  if (profile.evening_report_time?.slice(0, 2) === localHour && profile.last_evening_report_date !== localDate) {
+    return "evening";
+  }
+
+  return null;
+}
+
+function getLocalDate(timezone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: timezone,
+    year: "numeric"
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }
 
 function isToday(date) {

@@ -47,6 +47,7 @@ $searchFiles = Get-ChildItem -LiteralPath $rootPath -Recurse -File |
     $_.FullName -notmatch "\\.git\\" -and
     $_.FullName -notmatch "\\node_modules\\" -and
     $_.FullName -notmatch "\\.next\\" -and
+    $_.Name -ne ".env.example" -and
     $_.FullName -notmatch "\\codex-skills\\self-test-qa\\scripts\\check-project\.ps1$"
   }
 

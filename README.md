@@ -112,6 +112,21 @@ Commands:
 ## Checks
 
 ```powershell
+npm.cmd run check
+npm.cmd run check:project
+npm.cmd run check:rls
+powershell -ExecutionPolicy Bypass -File .\scripts\check-production.ps1
+```
+
+## Forking
+
+If someone forks this repo, they should create their own Supabase project, Telegram bot, and Cloudflare Worker. See `docs/fork-setup.md`.
+
+Do not reuse the maintainer's Supabase project or Telegram bot for another person's deployment.
+
+## Local Checks
+
+```powershell
 npm.cmd run typecheck
 npm.cmd run build
 powershell -ExecutionPolicy Bypass -File .\codex-skills\supabase-security\scripts\check-rls.ps1 -Path .\supabase\migrations
