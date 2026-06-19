@@ -81,7 +81,8 @@ button {
 .task-actions,
 .section-heading,
 .task-meta,
-.task-title-row {
+.task-title-row,
+.search-field {
   align-items: center;
   display: flex;
 }
@@ -256,6 +257,32 @@ select:focus {
   margin: 4px 0 0;
 }
 
+.switch-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.switch-row {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin: 0;
+}
+
+.switch-row input {
+  min-height: 18px;
+  width: 18px;
+}
+
+.time-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 12px;
+}
+
 .telegram-code {
   background: #17201b;
   border-radius: 8px;
@@ -325,9 +352,25 @@ select:focus {
   border-radius: 8px;
   display: grid;
   gap: 4px;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   margin-bottom: 14px;
   padding: 4px;
+}
+
+.search-field {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 0 12px;
+}
+
+.search-field input {
+  background: transparent;
+  border: 0;
+  padding-left: 0;
 }
 
 .tabs button {
@@ -417,6 +460,11 @@ select:focus {
   gap: 6px;
 }
 
+.task-actions select {
+  min-height: 42px;
+  width: 126px;
+}
+
 .empty-state {
   border: 1px dashed var(--line);
   border-radius: 8px;
@@ -487,7 +535,8 @@ select:focus {
 
   .form-grid,
   .stat-grid,
-  .tabs {
+  .tabs,
+  .time-grid {
     grid-template-columns: 1fr;
   }
 

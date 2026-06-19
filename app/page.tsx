@@ -11,6 +11,7 @@ import {
   LogOut,
   Plus,
   RefreshCw,
+  Search,
   Send,
   Settings,
   Trash2
@@ -18,9 +19,9 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import type { Task, TaskInput, TaskPriority, TaskStatus } from "@/types/task";
+import type { Profile, Task, TaskInput, TaskPriority, TaskStatus } from "@/types/task";
 
-type ViewKey = "today" | "upcoming" | "overdue" | "completed";
+type ViewKey = "today" | "week" | "upcoming" | "overdue" | "high" | "completed";
 type AuthMode = "signin" | "signup";
 
 const emptyTask: TaskInput = {
@@ -31,15 +32,24 @@ const emptyTask: TaskInput = {
   due_at: ""
 };
 
+const defaultProfile = {
+  timezone: "Asia/Bangkok",
+  telegram_reports_enabled: true,
+  telegram_reminders_enabled: true,
+  morning_report_time: "08:00",
+  evening_report_time: "18:00"
+};
+
 const demoTasks: Task[] = [
   {
     id: "demo-1",
     title: "Tạo tài khoản Supabase",
-    notes: "Lấy URL và anon key để đưa vào Vercel.",
+    notes: "Lấy URL và publishable key để đưa vào Vercel.",
     status: "doing",
     priority: "high",
     due_at: new Date().toISOString(),
     completed_at: null,
+    reminded_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -51,6 +61,7 @@ const demoTasks: Task[] = [
     priority: "normal",
     due_at: new Date(Date.now() + 86400000).toISOString(),
     completed_at: null,
+    reminded_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   }
@@ -66,16 +77,16 @@ export default function Home() {
   const [authMessage, setAuthMessage] = useState("");
   const [tasks, setTasks] = useState<Task[]>(configured ? [] : demoTasks);
   const [activeView, setActiveView] = useState<ViewKey>("today");
+  const [query, setQuery] = useState("");
   const [taskInput, setTaskInput] = useState<TaskInput>(emptyTask);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [telegramLinkCode, setTelegramLinkCode] = useState("");
 
   useEffect(() => {
-    if (!supabase) {
-      return;
-    }
+    if (!supabase) return;
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -91,37 +102,46 @@ export default function Home() {
   }, [supabase]);
 
   useEffect(() => {
-    if (!supabase || !session) {
-      return;
-    }
-
-    void loadTasks();
+    if (!supabase || !session) return;
+    void Promise.all([loadTasks(), loadProfile()]);
   }, [session, supabase]);
 
   const stats = useMemo(() => {
+    const active = tasks.filter((task) => task.status !== "done" && task.status !== "cancelled");
     return {
       total: tasks.length,
       done: tasks.filter((task) => task.status === "done").length,
       overdue: tasks.filter(isOverdue).length,
-      high: tasks.filter((task) => task.priority === "high" && task.status !== "done").length
+      high: active.filter((task) => task.priority === "high").length
     };
   }, [tasks]);
 
   const visibleTasks = useMemo(() => {
+    const needle = query.trim().toLowerCase();
     return tasks
       .filter((task) => {
-        if (activeView === "today") return isTodayOrUnscheduled(task) && task.status !== "done";
-        if (activeView === "upcoming") return isUpcoming(task.due_at) && task.status !== "done";
+        if (activeView === "today") return isTodayOrUnscheduled(task) && isActive(task);
+        if (activeView === "week") return Boolean(task.due_at) && isWithinDays(task.due_at, 7) && isActive(task);
+        if (activeView === "upcoming") return isUpcoming(task.due_at) && isActive(task);
         if (activeView === "overdue") return isOverdue(task);
+        if (activeView === "high") return task.priority === "high" && isActive(task);
         return task.status === "done";
       })
-      .sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority));
-  }, [activeView, tasks]);
+      .filter((task) => {
+        if (!needle) return true;
+        return `${task.title} ${task.notes ?? ""}`.toLowerCase().includes(needle);
+      })
+      .sort((a, b) => {
+        const dueDiff = dueRank(a) - dueRank(b);
+        if (dueDiff !== 0) return dueDiff;
+        return priorityRank(b.priority) - priorityRank(a.priority);
+      });
+  }, [activeView, query, tasks]);
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) {
-      setAuthMessage("Chưa cấu hình Supabase. Hiện app đang ở chế độ demo.");
+      setAuthMessage("Chưa cấu hình Supabase. App đang ở chế độ demo.");
       return;
     }
 
@@ -140,22 +160,47 @@ export default function Home() {
       return;
     }
 
-    setAuthMessage(
-      authMode === "signup"
-        ? "Đã tạo tài khoản. Kiểm tra email nếu Supabase yêu cầu xác nhận."
-        : "Đã đăng nhập."
-    );
+    setAuthMessage(authMode === "signup" ? "Đã tạo tài khoản. Kiểm tra email nếu cần xác nhận." : "Đã đăng nhập.");
+  }
+
+  async function loadProfile() {
+    if (!supabase || !session) return;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", session.user.id)
+      .maybeSingle();
+
+    if (error) {
+      setNotice(error.message);
+      return;
+    }
+
+    if (!data) {
+      const { data: created, error: createError } = await supabase
+        .from("profiles")
+        .insert({ id: session.user.id, ...defaultProfile })
+        .select("*")
+        .single();
+
+      if (createError) {
+        setNotice(createError.message);
+        return;
+      }
+
+      setProfile(created as Profile);
+      return;
+    }
+
+    setProfile(data as Profile);
   }
 
   async function loadTasks() {
     if (!supabase || !session) return;
 
     setLoading(true);
-    const { data, error } = await supabase
-      .from("tasks")
-      .select("*")
-      .order("created_at", { ascending: false });
-
+    const { data, error } = await supabase.from("tasks").select("*").order("created_at", { ascending: false });
     setLoading(false);
 
     if (error) {
@@ -179,6 +224,7 @@ export default function Home() {
       priority: taskInput.priority,
       due_at: taskInput.due_at ? new Date(taskInput.due_at).toISOString() : null,
       completed_at: taskInput.status === "done" ? new Date().toISOString() : null,
+      reminded_at: null,
       updated_at: new Date().toISOString()
     };
 
@@ -189,24 +235,16 @@ export default function Home() {
         created_at: new Date().toISOString()
       };
       setTasks((current) =>
-        editingId
-          ? current.map((task) => (task.id === editingId ? { ...task, ...localTask } : task))
-          : [localTask, ...current]
+        editingId ? current.map((task) => (task.id === editingId ? { ...task, ...localTask } : task)) : [localTask, ...current]
       );
-      setActiveView(viewForTask(localTask));
-      setNotice("Đã lưu việc.");
-      resetForm();
+      afterSave(localTask);
       return;
     }
 
     setLoading(true);
     const request = editingId
       ? supabase.from("tasks").update(payload).eq("id", editingId).select("*").single()
-      : supabase
-          .from("tasks")
-          .insert({ ...payload, user_id: session.user.id })
-          .select("*")
-          .single();
+      : supabase.from("tasks").insert({ ...payload, user_id: session.user.id }).select("*").single();
 
     const { data, error } = await request;
     setLoading(false);
@@ -217,12 +255,12 @@ export default function Home() {
     }
 
     const savedTask = data as Task;
-    setTasks((current) =>
-      editingId
-        ? current.map((task) => (task.id === editingId ? savedTask : task))
-        : [savedTask, ...current]
-    );
-    setActiveView(viewForTask(savedTask));
+    setTasks((current) => (editingId ? current.map((task) => (task.id === editingId ? savedTask : task)) : [savedTask, ...current]));
+    afterSave(savedTask);
+  }
+
+  function afterSave(task: Task) {
+    setActiveView(viewForTask(task));
     setNotice("Đã lưu việc.");
     resetForm();
   }
@@ -235,19 +273,11 @@ export default function Home() {
     };
 
     if (!supabase || !session) {
-      setTasks((current) =>
-        current.map((item) => (item.id === task.id ? { ...item, ...payload } : item))
-      );
+      setTasks((current) => current.map((item) => (item.id === task.id ? { ...item, ...payload } : item)));
       return;
     }
 
-    const { data, error } = await supabase
-      .from("tasks")
-      .update(payload)
-      .eq("id", task.id)
-      .select("*")
-      .single();
-
+    const { data, error } = await supabase.from("tasks").update(payload).eq("id", task.id).select("*").single();
     if (error) {
       setNotice(error.message);
       return;
@@ -286,10 +316,29 @@ export default function Home() {
     setEditingId(null);
   }
 
+  async function saveProfile(patch: Partial<Profile>) {
+    if (!supabase || !session || !profile) return;
+    const nextProfile = { ...profile, ...patch };
+    setProfile(nextProfile);
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        telegram_reports_enabled: nextProfile.telegram_reports_enabled,
+        telegram_reminders_enabled: nextProfile.telegram_reminders_enabled,
+        morning_report_time: nextProfile.morning_report_time,
+        evening_report_time: nextProfile.evening_report_time
+      })
+      .eq("id", session.user.id);
+
+    setNotice(error ? error.message : "Đã lưu cài đặt Telegram.");
+  }
+
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setTasks([]);
+    setProfile(null);
   }
 
   async function createTelegramLinkCode() {
@@ -339,38 +388,21 @@ export default function Home() {
           <div>
             <p className="eyebrow">Supabase Auth</p>
             <h2>{authMode === "signin" ? "Đăng nhập" : "Tạo tài khoản"}</h2>
-            <p className="muted">
-              Mỗi tài khoản sẽ có dữ liệu riêng nhờ `user_id` và Row Level Security.
-            </p>
+            <p className="muted">Mỗi tài khoản có dữ liệu riêng nhờ user_id và Row Level Security.</p>
           </div>
           <form className="auth-form" onSubmit={handleAuth}>
             <label>
               Email
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-              />
+              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
             </label>
             <label>
               Mật khẩu
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                minLength={6}
-              />
+              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} />
             </label>
             <button className="primary-button" disabled={loading}>
               {loading ? "Đang xử lý..." : authMode === "signin" ? "Đăng nhập" : "Tạo tài khoản"}
             </button>
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
-            >
+            <button className="text-button" type="button" onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}>
               {authMode === "signin" ? "Tạo tài khoản mới" : "Đã có tài khoản"}
             </button>
             {authMessage ? <p className="form-message">{authMessage}</p> : null}
@@ -388,9 +420,7 @@ export default function Home() {
                 Tên việc
                 <input
                   value={taskInput.title}
-                  onChange={(event) =>
-                    setTaskInput((current) => ({ ...current, title: event.target.value }))
-                  }
+                  onChange={(event) => setTaskInput((current) => ({ ...current, title: event.target.value }))}
                   placeholder="Ví dụ: Gửi báo giá khách A"
                   required
                 />
@@ -399,9 +429,7 @@ export default function Home() {
                 Ghi chú
                 <textarea
                   value={taskInput.notes}
-                  onChange={(event) =>
-                    setTaskInput((current) => ({ ...current, notes: event.target.value }))
-                  }
+                  onChange={(event) => setTaskInput((current) => ({ ...current, notes: event.target.value }))}
                   placeholder="Thông tin cần nhớ"
                   rows={4}
                 />
@@ -412,21 +440,14 @@ export default function Home() {
                   <input
                     type="datetime-local"
                     value={taskInput.due_at}
-                    onChange={(event) =>
-                      setTaskInput((current) => ({ ...current, due_at: event.target.value }))
-                    }
+                    onChange={(event) => setTaskInput((current) => ({ ...current, due_at: event.target.value }))}
                   />
                 </label>
                 <label>
                   Ưu tiên
                   <select
                     value={taskInput.priority}
-                    onChange={(event) =>
-                      setTaskInput((current) => ({
-                        ...current,
-                        priority: event.target.value as TaskPriority
-                      }))
-                    }
+                    onChange={(event) => setTaskInput((current) => ({ ...current, priority: event.target.value as TaskPriority }))}
                   >
                     <option value="low">Thấp</option>
                     <option value="normal">Vừa</option>
@@ -438,12 +459,7 @@ export default function Home() {
                 Trạng thái
                 <select
                   value={taskInput.status}
-                  onChange={(event) =>
-                    setTaskInput((current) => ({
-                      ...current,
-                      status: event.target.value as TaskStatus
-                    }))
-                  }
+                  onChange={(event) => setTaskInput((current) => ({ ...current, status: event.target.value as TaskStatus }))}
                 >
                   <option value="todo">Chưa làm</option>
                   <option value="doing">Đang làm</option>
@@ -471,25 +487,57 @@ export default function Home() {
               </div>
               <div className="setting-row">
                 <span>Múi giờ</span>
-                <strong>Asia/Bangkok</strong>
+                <strong>{profile?.timezone ?? "Asia/Bangkok"}</strong>
               </div>
               <div className="telegram-box">
                 <Send size={18} />
                 <div>
                   <strong>Telegram</strong>
-                  <p>Tạo mã rồi gửi cho bot: /link MA_LIEN_KET</p>
-                  {telegramLinkCode ? (
-                    <code className="telegram-code">/link {telegramLinkCode}</code>
-                  ) : null}
-                  <button
-                    className="mini-button"
-                    type="button"
-                    onClick={createTelegramLinkCode}
-                    disabled={!session}
-                  >
+                  <p>Bot: @task_tele_vtarch_bot</p>
+                  {telegramLinkCode ? <code className="telegram-code">/link {telegramLinkCode}</code> : null}
+                  <button className="mini-button" type="button" onClick={createTelegramLinkCode} disabled={!session}>
                     Tạo mã liên kết
                   </button>
-                  <p>Chuẩn bị liên kết bot sau khi Supabase ổn định.</p>
+                  <div className="switch-grid">
+                    <label className="switch-row">
+                      <input
+                        type="checkbox"
+                        checked={profile?.telegram_reminders_enabled ?? true}
+                        onChange={(event) => saveProfile({ telegram_reminders_enabled: event.target.checked } as Partial<Profile>)}
+                        disabled={!profile}
+                      />
+                      Nhắc việc đến hạn
+                    </label>
+                    <label className="switch-row">
+                      <input
+                        type="checkbox"
+                        checked={profile?.telegram_reports_enabled ?? true}
+                        onChange={(event) => saveProfile({ telegram_reports_enabled: event.target.checked } as Partial<Profile>)}
+                        disabled={!profile}
+                      />
+                      Báo cáo sáng/tối
+                    </label>
+                  </div>
+                  <div className="time-grid">
+                    <label>
+                      Sáng
+                      <input
+                        type="time"
+                        value={(profile?.morning_report_time ?? "08:00").slice(0, 5)}
+                        onChange={(event) => saveProfile({ morning_report_time: event.target.value } as Partial<Profile>)}
+                        disabled={!profile}
+                      />
+                    </label>
+                    <label>
+                      Tối
+                      <input
+                        type="time"
+                        value={(profile?.evening_report_time ?? "18:00").slice(0, 5)}
+                        onChange={(event) => saveProfile({ evening_report_time: event.target.value } as Partial<Profile>)}
+                        disabled={!profile}
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
@@ -509,30 +557,28 @@ export default function Home() {
                   <Filter size={18} />
                   <h2>Danh sách việc</h2>
                 </div>
-                <p className="muted">
-                  {configured
-                    ? session?.user.email
-                    : "Chưa cấu hình Supabase, dữ liệu đang chạy demo trên trình duyệt."}
-                </p>
+                <p className="muted">{configured ? session?.user.email : "Demo local, chưa kết nối Supabase."}</p>
               </div>
               <button className="icon-button" onClick={loadTasks} disabled={!session || loading} title="Tải lại">
                 <RefreshCw size={18} />
               </button>
             </div>
 
+            <label className="search-field">
+              <Search size={16} />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm theo tên việc hoặc ghi chú" />
+            </label>
+
             <div className="tabs" role="tablist" aria-label="Bộ lọc việc">
               {[
                 ["today", "Hôm nay"],
+                ["week", "Tuần này"],
                 ["upcoming", "Sắp tới"],
                 ["overdue", "Quá hạn"],
+                ["high", "Ưu tiên cao"],
                 ["completed", "Đã xong"]
               ].map(([key, label]) => (
-                <button
-                  key={key}
-                  className={activeView === key ? "active" : ""}
-                  onClick={() => setActiveView(key as ViewKey)}
-                  type="button"
-                >
+                <button key={key} className={activeView === key ? "active" : ""} onClick={() => setActiveView(key as ViewKey)} type="button">
                   {label}
                 </button>
               ))}
@@ -564,11 +610,19 @@ export default function Home() {
                       </div>
                       {task.notes ? <p>{task.notes}</p> : null}
                       <div className="task-meta">
+                        <span>{task.id.slice(0, 8)}</span>
                         <span>{priorityLabel(task.priority)}</span>
                         <span>{task.due_at ? formatDue(task.due_at) : "Chưa có hạn"}</span>
                       </div>
                     </div>
                     <div className="task-actions">
+                      <select value={task.status} onChange={(event) => updateStatus(task, event.target.value as TaskStatus)} title="Đổi trạng thái">
+                        <option value="todo">Chưa làm</option>
+                        <option value="doing">Đang làm</option>
+                        <option value="waiting">Chờ</option>
+                        <option value="done">Xong</option>
+                        <option value="cancelled">Bỏ qua</option>
+                      </select>
                       <button onClick={() => editTask(task)} title="Sửa">
                         <Edit3 size={16} />
                       </button>
@@ -587,15 +641,7 @@ export default function Home() {
   );
 }
 
-function Stat({
-  icon,
-  label,
-  value
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-}) {
+function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
   return (
     <div className="stat-card">
       <span>{icon}</span>
@@ -603,6 +649,10 @@ function Stat({
       <strong>{value}</strong>
     </div>
   );
+}
+
+function isActive(task: Task) {
+  return task.status !== "done" && task.status !== "cancelled";
 }
 
 function isToday(date: string | null) {
@@ -614,6 +664,13 @@ function isToday(date: string | null) {
 
 function isTodayOrUnscheduled(task: Task) {
   return !task.due_at || isToday(task.due_at);
+}
+
+function isWithinDays(date: string | null, days: number) {
+  if (!date) return false;
+  const target = new Date(date).getTime();
+  const now = Date.now();
+  return target >= now && target <= now + days * 24 * 60 * 60 * 1000;
 }
 
 function isUpcoming(date: string | null) {
@@ -630,9 +687,15 @@ function isOverdue(task: Task) {
 
 function viewForTask(task: Task): ViewKey {
   if (task.status === "done") return "completed";
+  if (task.priority === "high") return "high";
   if (isOverdue(task)) return "overdue";
+  if (isWithinDays(task.due_at, 7)) return "week";
   if (isUpcoming(task.due_at)) return "upcoming";
   return "today";
+}
+
+function dueRank(task: Task) {
+  return task.due_at ? new Date(task.due_at).getTime() : Number.MAX_SAFE_INTEGER;
 }
 
 function priorityRank(priority: TaskPriority) {

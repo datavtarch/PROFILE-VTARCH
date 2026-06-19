@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import type { Task } from "@/types/task";
+import type { Task, TaskPriority, TaskStatus } from "@/types/task";
 
 type TelegramMessage = {
   chat: {
@@ -16,7 +16,8 @@ type TelegramUpdate = {
   message?: TelegramMessage;
 };
 
-const ACTIVE_STATUSES = ["todo", "doing", "waiting"];
+const ACTIVE_STATUSES: TaskStatus[] = ["todo", "doing", "waiting"];
+const DEFAULT_PRIORITY: TaskPriority = "normal";
 
 export async function POST(request: NextRequest) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -41,21 +42,17 @@ export async function POST(request: NextRequest) {
   }
 
   const chatId = String(message.chat.id);
-  const text = message.text.trim();
 
   try {
     const reply = await handleCommand({
       chatId,
       username: message.from?.username ?? null,
-      text
+      text: message.text.trim()
     });
     await sendTelegramMessage(botToken, chatId, reply);
   } catch (error) {
-    await sendTelegramMessage(
-      botToken,
-      chatId,
-      error instanceof Error ? error.message : "Có lỗi khi xử lý lệnh."
-    );
+    const fallback = error instanceof Error ? error.message : "Co loi khi xu ly lenh.";
+    await sendTelegramMessage(botToken, chatId, fallback);
   }
 
   return NextResponse.json({ ok: true });
@@ -78,116 +75,166 @@ async function handleCommand({
   const [command, ...args] = text.split(/\s+/);
   const normalizedCommand = command.toLowerCase();
 
-  if (normalizedCommand === "/start") {
+  if (normalizedCommand === "/start" || normalizedCommand === "/help") {
     return [
-      "Task Tele đã sẵn sàng.",
-      "Vào app web, tạo mã Telegram trong Cài đặt rồi gửi:",
-      "/link MA_LIEN_KET"
+      "Task Tele da san sang.",
+      "Lenh dung duoc:",
+      "/link MA_LIEN_KET - lien ket tai khoan",
+      "/add Ten viec | ghi chu - them viec nhanh",
+      "/today - viec hom nay",
+      "/week - viec trong 7 ngay",
+      "/high - viec uu tien cao",
+      "/done MA_VIEC - danh dau xong",
+      "/report - bao cao nhanh"
     ].join("\n");
   }
 
   if (normalizedCommand === "/link") {
-    const token = args[0]?.trim();
-    if (!token) {
-      return "Gửi mã liên kết theo dạng: /link MA_LIEN_KET";
-    }
-
-    const { data: link, error: linkError } = await supabase
-      .from("telegram_link_tokens")
-      .select("id,user_id,expires_at,used_at")
-      .eq("token", token.toUpperCase())
-      .is("used_at", null)
-      .single();
-
-    if (linkError || !link) {
-      return "Mã liên kết không đúng hoặc đã được dùng.";
-    }
-
-    if (new Date(link.expires_at).getTime() < Date.now()) {
-      return "Mã liên kết đã hết hạn. Tạo mã mới trong app web.";
-    }
-
-    const { error: upsertError } = await supabase.from("telegram_accounts").upsert(
-      {
-        user_id: link.user_id,
-        telegram_chat_id: chatId,
-        telegram_username: username,
-        linked_at: new Date().toISOString()
-      },
-      { onConflict: "telegram_chat_id" }
-    );
-
-    if (upsertError) {
-      throw new Error(`Không liên kết được Telegram: ${upsertError.message}`);
-    }
-
-    await supabase
-      .from("telegram_link_tokens")
-      .update({ used_at: new Date().toISOString() })
-      .eq("id", link.id);
-
-    return "Đã liên kết Telegram với tài khoản Task Tele.";
+    return linkTelegramAccount(chatId, username, args[0]);
   }
 
   const userId = await getLinkedUserId(chatId);
   if (!userId) {
-    return "Telegram chưa liên kết. Vào app web tạo mã rồi gửi /link MA_LIEN_KET.";
+    return "Telegram chua lien ket. Vao app web tao ma roi gui /link MA_LIEN_KET.";
+  }
+
+  if (normalizedCommand === "/add") {
+    const raw = args.join(" ").trim();
+    if (!raw) {
+      return "Them viec theo dang: /add Ten viec | ghi chu tuy chon";
+    }
+    return createTaskFromTelegram(userId, raw);
   }
 
   if (normalizedCommand === "/today") {
     const tasks = await getActiveTasks(userId);
     const todayTasks = tasks.filter((task) => !task.due_at || isToday(task.due_at));
-    return formatTaskList("Việc hôm nay", todayTasks);
+    return formatTaskList("Viec hom nay", todayTasks);
+  }
+
+  if (normalizedCommand === "/week") {
+    const tasks = await getActiveTasks(userId);
+    return formatTaskList(
+      "Viec trong 7 ngay",
+      tasks.filter((task) => task.due_at && isWithinDays(task.due_at, 7))
+    );
+  }
+
+  if (normalizedCommand === "/high") {
+    const tasks = await getActiveTasks(userId);
+    return formatTaskList(
+      "Viec uu tien cao",
+      tasks.filter((task) => task.priority === "high")
+    );
   }
 
   if (normalizedCommand === "/report") {
-    const tasks = await getUserTasks(userId);
-    const activeTasks = tasks.filter((task) => ACTIVE_STATUSES.includes(task.status));
-    const todayCount = activeTasks.filter((task) => !task.due_at || isToday(task.due_at)).length;
-    const overdueCount = activeTasks.filter(isOverdue).length;
-    const doneCount = tasks.filter((task) => task.status === "done" && isToday(task.completed_at)).length;
-
-    return [
-      "Báo cáo Task Tele",
-      `Hôm nay: ${todayCount} việc`,
-      `Quá hạn: ${overdueCount} việc`,
-      `Đã xong hôm nay: ${doneCount} việc`,
-      "",
-      "Dùng /today để xem danh sách việc."
-    ].join("\n");
+    return buildReport(userId);
   }
 
   if (normalizedCommand === "/done") {
-    const shortId = args[0]?.trim();
-    if (!shortId) {
-      return "Đánh dấu xong theo dạng: /done MA_VIEC";
-    }
-
-    const tasks = await getActiveTasks(userId);
-    const task = tasks.find((item) => item.id.startsWith(shortId));
-    if (!task) {
-      return "Không tìm thấy việc với mã đó. Dùng /today để xem mã việc.";
-    }
-
-    const supabase = getSupabaseAdminClient();
-    const { error } = await supabase
-      .from("tasks")
-      .update({
-        status: "done",
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", task.id)
-      .eq("user_id", userId);
-
-    if (error) {
-      throw new Error(`Không cập nhật được việc: ${error.message}`);
-    }
-
-    return `Đã đánh dấu xong: ${task.title}`;
+    return markTaskDone(userId, args[0]);
   }
 
-  return "Lệnh hỗ trợ: /start, /link, /today, /done MA_VIEC, /report";
+  return "Lenh ho tro: /help, /add, /today, /week, /high, /done MA_VIEC, /report";
+}
+
+async function linkTelegramAccount(chatId: string, username: string | null, token?: string) {
+  if (!token) {
+    return "Gui ma lien ket theo dang: /link MA_LIEN_KET";
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data: link, error: linkError } = await supabase
+    .from("telegram_link_tokens")
+    .select("id,user_id,expires_at,used_at")
+    .eq("token", token.toUpperCase())
+    .is("used_at", null)
+    .single();
+
+  if (linkError || !link) {
+    return "Ma lien ket khong dung hoac da duoc dung.";
+  }
+
+  if (new Date(link.expires_at).getTime() < Date.now()) {
+    return "Ma lien ket da het han. Tao ma moi trong app web.";
+  }
+
+  const { error: upsertError } = await supabase.from("telegram_accounts").upsert(
+    {
+      user_id: link.user_id,
+      telegram_chat_id: chatId,
+      telegram_username: username,
+      linked_at: new Date().toISOString()
+    },
+    { onConflict: "telegram_chat_id" }
+  );
+
+  if (upsertError) {
+    throw new Error(`Khong lien ket duoc Telegram: ${upsertError.message}`);
+  }
+
+  await supabase
+    .from("telegram_link_tokens")
+    .update({ used_at: new Date().toISOString() })
+    .eq("id", link.id);
+
+  return "Da lien ket Telegram voi tai khoan Task Tele.";
+}
+
+async function createTaskFromTelegram(userId: string, raw: string) {
+  const [titlePart, notesPart] = raw.split("|").map((part) => part.trim());
+  const title = titlePart.slice(0, 160);
+  const notes = notesPart || null;
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .insert({
+      user_id: userId,
+      title,
+      notes,
+      status: "todo",
+      priority: DEFAULT_PRIORITY,
+      updated_at: new Date().toISOString()
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(`Khong them duoc viec: ${error.message}`);
+  }
+
+  const task = data as Task;
+  return [`Da them viec: ${task.title}`, `Ma viec: ${task.id.slice(0, 8)}`].join("\n");
+}
+
+async function markTaskDone(userId: string, shortId?: string) {
+  if (!shortId) {
+    return "Danh dau xong theo dang: /done MA_VIEC";
+  }
+
+  const tasks = await getActiveTasks(userId);
+  const task = tasks.find((item) => item.id.startsWith(shortId));
+  if (!task) {
+    return "Khong tim thay viec voi ma do. Dung /today de xem ma viec.";
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from("tasks")
+    .update({
+      status: "done",
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", task.id)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`Khong cap nhat duoc viec: ${error.message}`);
+  }
+
+  return `Da danh dau xong: ${task.title}`;
 }
 
 async function getLinkedUserId(chatId: string) {
@@ -211,7 +258,7 @@ async function getUserTasks(userId: string) {
     .limit(100);
 
   if (error) {
-    throw new Error(`Không đọc được danh sách việc: ${error.message}`);
+    throw new Error(`Khong doc duoc danh sach viec: ${error.message}`);
   }
 
   return (data ?? []) as Task[];
@@ -222,7 +269,26 @@ async function getActiveTasks(userId: string) {
   return tasks.filter((task) => ACTIVE_STATUSES.includes(task.status));
 }
 
-async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
+async function buildReport(userId: string) {
+  const tasks = await getUserTasks(userId);
+  const activeTasks = tasks.filter((task) => ACTIVE_STATUSES.includes(task.status));
+  const todayCount = activeTasks.filter((task) => !task.due_at || isToday(task.due_at)).length;
+  const weekCount = activeTasks.filter((task) => task.due_at && isWithinDays(task.due_at, 7)).length;
+  const overdueCount = activeTasks.filter(isOverdue).length;
+  const doneCount = tasks.filter((task) => task.status === "done" && isToday(task.completed_at)).length;
+
+  return [
+    "Bao cao Task Tele",
+    `Hom nay: ${todayCount} viec`,
+    `7 ngay toi: ${weekCount} viec`,
+    `Qua han: ${overdueCount} viec`,
+    `Da xong hom nay: ${doneCount} viec`,
+    "",
+    "Dung /today, /week hoac /high de xem chi tiet."
+  ].join("\n");
+}
+
+export async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -234,24 +300,25 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
   });
 
   if (!response.ok) {
-    throw new Error("Không gửi được tin nhắn Telegram.");
+    const errorText = await response.text();
+    throw new Error(`Khong gui duoc tin nhan Telegram: ${errorText}`);
   }
 }
 
-function formatTaskList(title: string, tasks: Task[]) {
+export function formatTaskList(title: string, tasks: Task[]) {
   if (tasks.length === 0) {
-    return `${title}: không có việc.`;
+    return `${title}: khong co viec.`;
   }
 
   return [
     `${title}:`,
     ...tasks.slice(0, 20).map((task) => {
       const code = task.id.slice(0, 8);
-      const due = task.due_at ? formatDate(task.due_at) : "chưa có hạn";
-      return `- ${code} | ${task.title} | ${due}`;
+      const due = task.due_at ? formatDate(task.due_at) : "chua co han";
+      return `- ${code} | ${task.title} | ${priorityLabel(task.priority)} | ${due}`;
     }),
     "",
-    "Đánh dấu xong: /done MA_VIEC"
+    "Danh dau xong: /done MA_VIEC"
   ].join("\n");
 }
 
@@ -260,6 +327,13 @@ function isToday(date: string | null) {
   const target = new Date(date);
   const now = new Date();
   return target.toDateString() === now.toDateString();
+}
+
+function isWithinDays(date: string | null, days: number) {
+  if (!date) return false;
+  const target = new Date(date).getTime();
+  const now = Date.now();
+  return target >= now && target <= now + days * 24 * 60 * 60 * 1000;
 }
 
 function isOverdue(task: Task) {
@@ -273,4 +347,8 @@ function formatDate(date: string) {
     timeStyle: "short",
     timeZone: "Asia/Bangkok"
   }).format(new Date(date));
+}
+
+function priorityLabel(priority: TaskPriority) {
+  return { low: "thap", normal: "vua", high: "cao" }[priority];
 }

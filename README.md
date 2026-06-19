@@ -1,49 +1,92 @@
 # Task Tele
 
-Personal task manager built with Next.js, Supabase, and a Telegram-ready architecture.
+Personal task manager with Supabase Auth, private per-user data, Telegram commands, reminders, and scheduled reports.
 
 ## Stack
 
 - Next.js + TypeScript
 - Supabase Auth + Postgres + Row Level Security
-- Vercel deployment target
-- Telegram reporting planned after the web app is stable
+- Vercel hosting + Vercel Cron
+- Telegram Bot API webhook
 
 ## Local Setup
-
-1. Install dependencies:
 
 ```powershell
 npm.cmd install
 ```
 
-2. Create `.env.local`:
+Create `.env.local`:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=
+CRON_SECRET=
 ```
 
-3. Run the app:
+Run:
 
 ```powershell
 npm.cmd run dev
 ```
 
-4. Open:
-
-```text
-http://127.0.0.1:3000
-```
-
-If Supabase env vars are empty, the app runs in local demo mode.
+Open `http://127.0.0.1:3000`.
 
 ## Supabase Setup
 
-1. Create a Supabase project.
-2. Open SQL Editor.
-3. Run `supabase/migrations/0001_initial.sql`.
-4. Copy the project URL and publishable key into `.env.local`.
+Run migrations in order from `supabase/migrations`:
+
+1. `0001_initial.sql`
+2. `0002_authenticated_grants.sql`
+3. `0003_telegram_link_tokens.sql`
+4. `0004_service_role_grants.sql`
+5. `0005_reports_and_reminders.sql`
+
+RLS keeps each user's tasks private through `auth.uid() = user_id`.
+
+## Vercel Env
+
+Set these in Vercel Project Settings:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SECRET_KEY`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `CRON_SECRET`
+
+`vercel.json` runs `/api/telegram/cron` every hour.
+
+## Telegram
+
+Set webhook:
+
+```text
+https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook
+```
+
+Body:
+
+```json
+{
+  "url": "https://task-tele.vercel.app/api/telegram/webhook",
+  "secret_token": "<TELEGRAM_WEBHOOK_SECRET>",
+  "drop_pending_updates": true
+}
+```
+
+Commands:
+
+- `/help`
+- `/link MA_LIEN_KET`
+- `/add Ten viec | ghi chu`
+- `/today`
+- `/week`
+- `/high`
+- `/done MA_VIEC`
+- `/report`
 
 ## Checks
 
